@@ -1,3 +1,4 @@
+#!/usr/lib64/zabbix7-lts/externalscripts/myenv/bin/python3
 import base64
 import json
 import os
@@ -32,7 +33,7 @@ VISIBILITY_WAIT = 10
 ERROR_CONTAINER_VISIBLE_ALERTS_SELECTOR = ".errors-container .alert.show"
 
 # Путь к .env и загрузка переменных, как в test_isales.py
-env_path = Path(__file__).with_name(".env")
+env_path = Path(__file__).with_name("_env")
 load_dotenv(dotenv_path=env_path)
 load_dotenv()
 

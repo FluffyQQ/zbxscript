@@ -1,3 +1,4 @@
+#!/usr/lib64/zabbix7-lts/externalscripts/myenv/bin/python3
 import os
 import sys
 import json
@@ -19,7 +20,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import re
 
-env_path = Path(__file__).with_name('.env')
+env_path = Path(__file__).with_name('_env')
 load_dotenv(dotenv_path=env_path)
 load_dotenv()
 
