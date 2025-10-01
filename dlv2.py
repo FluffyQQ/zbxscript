@@ -36,9 +36,7 @@ SELENIUM_GRID_PASSWORD = os.getenv('SELENIUM_GRID_PASSWORD')
 
 URL = 'https://pro.delo-logistics.com'
 DRIVER_WAIT_EXPLICIT = 10
-SCREENSHOTS_DIR = '/tmp/screenshots'
-
-
+SCREENSHOTS_DIR = '/opt/screenshots'
 
 # Подавление лишних предупреждений в stdout/stderr
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -277,11 +275,17 @@ class TestIsales:
                 # Создаем скриншот в памяти
                 screenshot_bytes = self.driver.get_screenshot_as_png()
                 
-                # Сохраняем локально в /tmp/screenshots с фиксированным именем
+                # Сохраняем локально как фиксированное имя и предварительно удаляем существующий файл
                 try:
                     ensure_screenshots_dir()
                     filename = "test_isales_error.png"
                     filepath = os.path.join(SCREENSHOTS_DIR, filename)
+                    try:
+                        if os.path.exists(filepath):
+                            os.remove(filepath)
+                            logger.info(f"Удален старый файл скриншота: {filepath}")
+                    except Exception as rm_err:
+                        logger.warning(f"Не удалось удалить старый скриншот {filepath}: {rm_err}")
                     with open(filepath, 'wb') as f:
                         f.write(screenshot_bytes)
                     logger.info(f"Скриншот сохранён: {filepath}")
@@ -564,6 +568,8 @@ class TestIsales:
                 texts = [el.text for el in elements]
                 return any(text in texts for text in expected_texts)
             wait.until(check_status)
+        except TimeoutException:
+            raise Exception("Ошибка при ожидании статуса 'Резервирование оборудования': превышено время ожидания")
         except Exception as e:
             logger.error(f"Ошибка при ожидании статуса 'Резервирование оборудования': {e}")
             raise Exception(f"Ошибка при ожидании статуса 'Резервирование оборудования': {e}")
@@ -576,6 +582,8 @@ class TestIsales:
                 element = self.wait_element("//div[@class='view-order-pro__status-line-price']//div[contains(@class, 'MuiStep-root')]//span[contains(@class, 'Mui-active')]//div[@class='line-pro__title']")
                 return any(text in element.text for text in expected_texts)
             wait.until(check_payment_status)
+        except TimeoutException:
+            raise Exception("Ошибка при ожидании статуса 'Требуется оплата': превышено время ожидания")
         except Exception as e:
             logger.error(f"Ошибка при ожидании статуса 'Требуется оплата': {e}")
             raise Exception(f"Ошибка при ожидании статуса 'Требуется оплата': {e}")
@@ -658,11 +666,17 @@ def log_test_result(func):
             try:
                 screenshot_bytes = self.driver.get_screenshot_as_png()
                 
-                # Сохраняем локально в /tmp/screenshots с фиксированным именем
+                # Сохраняем локально как фиксированное имя и предварительно удаляем существующий файл
                 try:
                     ensure_screenshots_dir()
                     filename = "test_isales_error.png"
                     filepath = os.path.join(SCREENSHOTS_DIR, filename)
+                    try:
+                        if os.path.exists(filepath):
+                            os.remove(filepath)
+                            logger.info(f"Удален старый файл скриншота: {filepath}")
+                    except Exception as save_rm_err:
+                        logger.warning(f"Не удалось удалить старый скриншот {filepath}: {save_rm_err}")
                     with open(filepath, 'wb') as f:
                         f.write(screenshot_bytes)
                     logger.info(f"Screenshot saved to: {filepath}")
@@ -704,24 +718,36 @@ def run_test_cycle():
         # Инициализация тестового класса и WebDriver
     test = TestIsales()
     test.driver = None
+    # Инициализируем результат тестирования как можно раньше, чтобы в случае
+    # ранних ошибок (например, при подключении к Selenium Grid) мы всё равно
+    # смогли вывести корректный JSON
+    if not hasattr(test, 'test_result'):
+        test.test_result = TestResult()
     
     try:
         # Инициализация WebDriver через Selenium Grid или локально
         chrome_options = Options()
         chrome_options.add_argument('--window-size=1920,1080')
         if USE_SELENIUM_GRID:
-            test.driver = webdriver.Remote(
-                command_executor=SELENIUM_GRID_URL,
-                options=chrome_options
-            )
+            # Проверка Selenium Grid настроек и соединения (как в itrans.py)
+            try:
+                if not SELENIUM_GRID_URL:
+                    raise Exception("Ошибка подключения к Selenium Grid: не задан SELENIUM_GRID_URL.")
+                test.driver = webdriver.Remote(
+                    command_executor=SELENIUM_GRID_URL,
+                    options=chrome_options
+                )
+            except Exception:
+                raise Exception("Ошибка подключения к Selenium Grid: не удалось установить соединение с удалённым драйвером.")
         else:
             test.driver = webdriver.Chrome(options=chrome_options)
         test.wait = WebDriverWait(test.driver, DRIVER_WAIT_EXPLICIT)
         TestIsales.driver = test.driver  # Set class-level driver
         TestIsales.wait = test.wait      # Set class-level wait
         
-        # Инициализируем результат тестирования
-        test.test_result = TestResult()
+        # Инициализируем результат тестирования (уже инициализирован выше как подстраховка)
+        if not hasattr(test, 'test_result'):
+            test.test_result = TestResult()
         
         # Тестовые данные
         routes = [
@@ -751,9 +777,13 @@ def run_test_cycle():
             {'from': 'Базаиха, терминал ТК, Красноярск, РОССИЯ', 'to': 'Безымянка, терминал РЖД, Самара, РОССИЯ'},
         ]
         route_data = random.choice(routes)
-        # Сохраняем выбранный маршрут в результат теста для JSON
+        # Сохраняем выбранный маршрут в результат теста для JSON как строку "откуда - куда"
         if hasattr(test, 'test_result'):
-            test.test_result.selected_route = route_data
+            try:
+                test.test_result.selected_route = f"{route_data['from']} - {route_data['to']}"
+            except Exception:
+                # На случай, если структура данных будет иной
+                test.test_result.selected_route = str(route_data)
         cargo_data = {'code': '123018', 'name': 'Тестовый груз 1'}
         contract_data = {'number': 'ТЕСТ-0000001', 'description': 'Тестовый контракт'}
         
@@ -815,23 +845,26 @@ def run_test_cycle():
     except Exception as e:
         logging.error(f"Цикл тестов завершился с ошибкой: {str(e)}")
 
-        # Завершаем результат с ошибкой
-        if hasattr(test, 'test_result'):
-            # Подсчитаем успешно выполненные шаги на момент ошибки
-            successful_steps = sum(1 for step in test.test_result.steps.values() if step.get("status") == "1")
-            total_steps = 14
-            total_duration_seconds = time.time() - test.test_result.start_timestamp
-            error_message = (
-                f"Тест завершился с ошибкой: {successful_steps}/{total_steps} шагов за {total_duration_seconds:.2f} сек"
-            )
-            test.test_result.finalize(
-                success=False,
-                message=error_message,
-                error=str(e)
-            )
-            # Печатаем JSON для элемента Zabbix
-            json_data = test.test_result.to_dict()
-            print(json.dumps(json_data, indent=2, ensure_ascii=False))
+        # Гарантируем наличие test_result
+        if not hasattr(test, 'test_result') or test.test_result is None:
+            test.test_result = TestResult()
+
+        # Формируем ошибку и пробуем сделать скриншот
+        err_text = f"Общая ошибка: {str(e)}"
+        try:
+            if getattr(test, 'driver', None):
+                screenshot_bytes = test.driver.get_screenshot_as_png()
+                test.test_result.set_screenshot(screenshot_bytes)
+        except Exception:
+            pass
+
+        test.test_result.finalize(
+            success=False,
+            message="Тест завершился с ошибкой",
+            error=err_text,
+        )
+        json_data = test.test_result.to_dict()
+        print(json.dumps(json_data, indent=2, ensure_ascii=False))
 
         return False
         
