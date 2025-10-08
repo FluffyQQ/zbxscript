@@ -1,3 +1,4 @@
+#!/usr/lib64/zabbix7-lts/externalscripts/myenv/bin/python3
 import base64
 import json
 import logging
