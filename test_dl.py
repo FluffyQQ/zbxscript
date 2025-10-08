@@ -455,7 +455,7 @@ class TestIsales:
             raise Exception(f"Ошибка при запуске расчета стоимости: {e}")
 
     def test_06_select_transport_solution(self):
-        timeout = 240
+        timeout = 60
         try:
             offer_button = self.wait_element("//div[contains(@class, 'Offer_buttonCol')]//button", timeout)
             draft_id = re.search(r'/private/current-draft/(\d+)', self.driver.current_url)
