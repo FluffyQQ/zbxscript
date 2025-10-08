@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import time
+import warnings
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -19,6 +20,14 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+
+# Silence Selenium warning about creds in URL to keep stdout pure JSON
+warnings.filterwarnings(
+    "ignore",
+    message="Embedding username and password in URL could be insecure, use ClientConfig instead",
+    category=UserWarning,
+    module="selenium.webdriver.remote.remote_connection",
+)
 
 DEFAULT_URL = "https://itrans.trcont.ru/"
 
@@ -40,10 +49,11 @@ load_dotenv()
 USE_SELENIUM_GRID = True  # False — локально, True — через Grid
 
 # Данные Selenium Grid (как в test_isales.py)
-SELENIUM_GRID_LOGIN = os.getenv('SELENIUM_GRID_LOGIN')
-SELENIUM_GRID_PASSWORD = os.getenv('SELENIUM_GRID_PASSWORD')
+SELENIUM_GRID_LOGIN = os.getenv("SELENIUM_GRID_LOGIN")
+SELENIUM_GRID_PASSWORD = os.getenv("SELENIUM_GRID_PASSWORD")
 
 SELENIUM_GRID_URL = f"http://{SELENIUM_GRID_LOGIN}:{SELENIUM_GRID_PASSWORD}@172.18.65.116:4444/wd/hub"
+
 
 class TestResult:
     def __init__(self):
@@ -57,12 +67,7 @@ class TestResult:
         self.test_info: Dict[str, Any] = {}
 
     def add_step(self, step_name: str, status: str = "1", duration_seconds: float = 0.0):
-        self.steps[step_name] = {
-            "status": status,
-            "timing": {
-                "duration_seconds": round(duration_seconds, 2)
-            }
-        }
+        self.steps[step_name] = {"status": status, "timing": {"duration_seconds": round(duration_seconds, 2)}}
         if status == "0":
             self.success = False
             self.status = "0"
@@ -76,20 +81,21 @@ class TestResult:
         self.status = "1" if success else "0"
         self.message = message
         self.error = error
-        self.test_info = {
-            "total_duration": round(end - self.start_time, 2)
-        }
+        self.test_info = {"total_duration": round(end - self.start_time, 2)}
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data = {
             "success": self.success,
             "status": self.status,
             "message": self.message,
-            "error": self.error,
             "test_info": self.test_info,
             "steps": self.steps,
             "screenshot": self.screenshot,
         }
+        # Do not include error field when there is no error to avoid null in Zabbix
+        if self.error is not None:
+            data["error"] = self.error
+        return data
 
 
 def env(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -101,7 +107,7 @@ def env(name: str, default: Optional[str] = None) -> Optional[str]:
 
 def build_driver() -> WebDriver:
     chrome_options = Options()
-    chrome_options.add_argument('--window-size=1920,1080')
+    chrome_options.add_argument("--window-size=1920,1080")
     if USE_SELENIUM_GRID:
         try:
             if not SELENIUM_GRID_URL:
@@ -157,9 +163,7 @@ class ItransTest:
     def wait_element(self, xpath: str, timeout: int = DEFAULT_WAIT):
         try:
             wait = (
-                self.wait
-                if timeout == DEFAULT_WAIT and self.wait is not None
-                else WebDriverWait(self.driver, timeout)
+                self.wait if timeout == DEFAULT_WAIT and self.wait is not None else WebDriverWait(self.driver, timeout)
             )
             element = wait.until(EC.presence_of_element_located((By.XPATH, xpath)))
             # Проверяем, не появился ли баннер ошибки
@@ -206,17 +210,13 @@ class ItransTest:
 
     def wait_visible_by_xpath(self, xpath: str, timeout: int = VISIBILITY_WAIT, description: Optional[str] = None):
         try:
-            WebDriverWait(self.driver, timeout).until(
-                EC.visibility_of_element_located((By.XPATH, xpath))
-            )
+            WebDriverWait(self.driver, timeout).until(EC.visibility_of_element_located((By.XPATH, xpath)))
             self.raise_if_error_banner()
         except TimeoutException:
             # Формат требуемого сообщения об ошибке при ожидании видимости текста
             title = description or ""
             title_part = f' "{title}"' if title else ""
-            raise Exception(
-                f"Ошибка при проверке видимости надписи{title_part} Локатор = {xpath}."
-            )
+            raise Exception(f"Ошибка при проверке видимости надписи{title_part} Локатор = {xpath}.")
 
 
 def send_telegram_alert(
@@ -229,17 +229,17 @@ def send_telegram_alert(
 
     Поведение при отладке управляется переменной окружения TELEGRAM_DEBUG=true/1.
     """
-    debug = (os.getenv("TELEGRAM_DEBUG", "").lower() in ("1", "true", "yes"))
+    debug = os.getenv("TELEGRAM_DEBUG", "").lower() in ("1", "true", "yes")
     if not token or not chat_id:
         if debug:
             print("[telegram] пропуск: не задан TELEGRAM_BOT_TOKEN или TELEGRAM_CHAT_ID", file=sys.stderr)
         return
 
     # Заголовок для всех сообщений этого модуля
-    header = "Модуль планирования и координации"
+    header = "Модуль управления АТ плечом"
 
     # Ограничим длину текста для caption (Telegram: до ~1024 символов для фото)
-    original_text = (text or "")
+    original_text = text or ""
     safe_caption = f"{header}" if not original_text else f"{header}\n{original_text}"
     if screenshot_b64 and len(safe_caption) > 1000:
         safe_caption = safe_caption[:1000] + "…"
@@ -293,205 +293,91 @@ def step_01_open_and_login(test: ItransTest, base_url: str, username: str, passw
     except Exception:
         raise Exception(f"Ошибка при открытии сайта: текущий URL = {d.current_url}")
 
-    # Нажатие кнопки "Модуль планирования и координации"
-    test.click_element("//*[@id='app']/div/div[3]/a[1]/span", timeout=30)
+    # Нажатие кнопки "Модуль управления АТ плечом"
+    test.click_element("//*[@id='app']/div/div[3]/a[6]/span", timeout=30)
 
-    # Ввод логина/пароля по фиксированным XPath, как в test_isales.py
-    test.wait_element("//input[@id='username']", timeout=20).send_keys(username)
-    test.wait_element("//input[@id='password']", timeout=20).send_keys(password)
-    test.click_element("//input[@type='submit']", timeout=CLICK_WAIT)
+    # Ввод логина/пароля
+    test.wait_element("//input[@name='login']", timeout=20).send_keys(username)
+    test.wait_element("//input[@type='password']", timeout=20).send_keys(password)
+    test.click_element("//span[contains(text(), 'Вход')]", timeout=CLICK_WAIT)
 
-    # Проверка успешного входа — наличие чего-то после логина
+    # Проверка успешного входа — наличие вкладки "РМ Диспетчера"
     WebDriverWait(d, VISIBILITY_WAIT).until(
-        EC.presence_of_element_located((By.XPATH, "//*[contains(normalize-space(.), 'Модуль координатора')]"))
+        EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'РМ Диспетчера')]"))
     )
 
 
-def step_02_open_coordinator_module(test: ItransTest) -> None:
-    # Если есть кнопка "Обновить" — нажать
-    try:
-        test.click_element("//*[@id='app']/div[4]/div/div[2]/a[1]", timeout=5, description="Обновить")
-        time.sleep(1)
-    except Exception:
-        pass
+def step_02_open_at_module(test: ItransTest) -> None:
+    # Проверяем наличие вкладки "РМ Диспетчера"
+    tab_xpath = "//div[contains(text(), 'РМ Диспетчера')]"
+    if not test.element_is_present(tab_xpath, timeout=DEFAULT_WAIT):
+        raise Exception("Вкладка 'РМ Диспетчера' не найдена на странице")
 
-    # Нажать кнопку для раскрытия меню
-    test.click_element("//*[@id='app']/div[4]/div/div[1]/span", timeout=CLICK_WAIT)
-    time.sleep(5)
-
-    # Проверяем наличие вкладки "Модуль координатора"
-    coordinator_xpath = "//*[@id='coordinator']/button/span"
-    if not test.element_is_present(coordinator_xpath, timeout=DEFAULT_WAIT):
-        raise Exception("Вкладка 'Модуль координатора' не найдена на странице")
-
-    # Открыть вкладку "Модуль координатора"
-    test.click_element(coordinator_xpath, timeout=CLICK_WAIT, description="Модуль координатора")
+    # Открыть вкладку "РМ Диспетчера"
+    test.click_element(tab_xpath, timeout=CLICK_WAIT, description="Модуль управления депо и терминалами")
     time.sleep(2)
 
-    # Подвкладки и ожидаемые надписи
-    subtabs = [
-        ("//*[@id='coordinator-collapse']/ul/li[2]/a", "Монитор заказов", "Выполнение"),
-    ]
-    # Проверим, что подвкладки присутствуют (по тексту ссылки)
-    missing_tabs = []
-    for _xpath, tab_name, _expected in subtabs:
-        try:
-            WebDriverWait(test.driver, VISIBILITY_WAIT).until(
-                EC.visibility_of_element_located((By.LINK_TEXT, tab_name))
-            )
-            test.raise_if_error_banner()
-        except TimeoutException:
-            missing_tabs.append(tab_name)
-    if missing_tabs:
-        raise Exception(f"Отсутствуют подвкладки: {', '.join(missing_tabs)}")
-    for xpath, title, expected_text in subtabs:
-        test.click_element(xpath, timeout=CLICK_WAIT, description=title)
-        time.sleep(2)
-        test.wait_visible_by_xpath(
-            f"//*[contains(normalize-space(.), '{expected_text}')]",
-            timeout=VISIBILITY_WAIT,
-            description=expected_text,
-        )
-        test.raise_if_error_banner()
-
-
-
-def step_03_open_analytics_module(test: ItransTest) -> None:
-    # Проверяем наличие вкладки "Аналитика"
-    analytics_tab_xpath = "//*[@id='analitycs']/button/span"
-    if not test.element_is_present(analytics_tab_xpath, timeout=DEFAULT_WAIT):
-        raise Exception("Вкладка 'Аналитика' не найдена на странице")
-
-    # Открыть вкладку
-    test.click_element(analytics_tab_xpath, timeout=CLICK_WAIT, description="Аналитика")
-    time.sleep(2)
-
-    # Подвкладки и ожидаемые надписи
-    subtabs = [
-        ("//*[@id='analitycs-collapse']/ul/li[1]/a", "Отчеты", "Отчет ПСЖВС"),
-    ]
-    # Проверим, что подвкладки присутствуют (по тексту ссылки)
-    missing_tabs = []
-    for _xpath, tab_name, _expected in subtabs:
-        try:
-            WebDriverWait(test.driver, VISIBILITY_WAIT).until(
-                EC.visibility_of_element_located((By.LINK_TEXT, tab_name))
-            )
-            test.raise_if_error_banner()
-        except TimeoutException:
-            missing_tabs.append(tab_name)
-    if missing_tabs:
-        raise Exception(f"Отсутствуют подвкладки: {', '.join(missing_tabs)}")
-    for xpath, title, expected_text in subtabs:
-        test.click_element(xpath, timeout=CLICK_WAIT, description=title)
-        time.sleep(2)
-        test.wait_visible_by_xpath(
-            f"//*[contains(normalize-space(.), '{expected_text}')]",
-            timeout=VISIBILITY_WAIT,
-            description=expected_text,
-        )
-        test.raise_if_error_banner()
-
-
-
-def step_04_open_resources_module(test: ItransTest) -> None:
-    # Проверяем наличие вкладки "Модуль управления ресурсами"
-    resources_tab_xpath = "//*[@id='resources']/button/span"
-    if not test.element_is_present(resources_tab_xpath, timeout=DEFAULT_WAIT):
-        raise Exception("Вкладка 'Модуль управления ресурсами' не найдена на странице")
-
-    # Открыть вкладку
-    test.click_element(resources_tab_xpath, timeout=CLICK_WAIT, description="Модуль управления ресурсами")
-    time.sleep(2)
-
-    # Подвкладки и ожидаемые надписи
-    subtabs = [
-        ("//*[@id='resources-collapse']/ul/li[1]/a", "Контейнеры без заказа", "Номер контейнера"),
-        ("//*[@id='resources-collapse']/ul/li[2]/a", "События дислокации", "Номер контейнера"),
-        ("//*[@id='resources-collapse']/ul/li[3]/a", "Справочник текущей дислокации ресурсов", "Номер контейнера"),
-    ]
-    # Проверим, что подвкладки присутствуют (по тексту ссылки)
-    missing_tabs = []
-    for _xpath, tab_name, _expected in subtabs:
-        try:
-            WebDriverWait(test.driver, VISIBILITY_WAIT).until(
-                EC.visibility_of_element_located((By.LINK_TEXT, tab_name))
-            )
-            test.raise_if_error_banner()
-        except TimeoutException:
-            missing_tabs.append(tab_name)
-    if missing_tabs:
-        raise Exception(f"Отсутствуют подвкладки: {', '.join(missing_tabs)}")
-    for xpath, title, expected_text in subtabs:
-        test.click_element(xpath, timeout=CLICK_WAIT, description=title)
-        time.sleep(2)
-        test.wait_visible_by_xpath(
-            f"//*[contains(normalize-space(.), '{expected_text}')]",
-            timeout=VISIBILITY_WAIT,
-            description=expected_text,
-        )
-        test.raise_if_error_banner()
-
-
-def step_05_open_sales_module(test: ItransTest) -> None:
-    # Проверяем наличие вкладки "Регулировка"
-    sales_tab_xpath = "//*[@id='sales']/button/span"
-    if not test.element_is_present(sales_tab_xpath, timeout=DEFAULT_WAIT):
-        raise Exception("Вкладка 'Регулировка' не найдена на странице")
-
-    # Открыть вкладку
-    test.click_element(sales_tab_xpath, timeout=CLICK_WAIT, description="Регулировка")
-    time.sleep(2)
-
-    # Подвкладки и ожидаемые надписи
-    subtabs = [
-        ("//*[@id='sales-collapse']/ul/li[1]/a", "Журнал регулировочных заказов", "Выполнение"),
-        ("//*[@id='sales-collapse']/ul/li[2]/a", "Создать заказ на регулировку", "Доходный договор"),
-    ]
-    # Проверим, что подвкладки присутствуют (по тексту ссылки)
-    missing_tabs = []
-    for _xpath, tab_name, _expected in subtabs:
-        try:
-            WebDriverWait(test.driver, VISIBILITY_WAIT).until(
-                EC.visibility_of_element_located((By.LINK_TEXT, tab_name))
-            )
-            test.raise_if_error_banner()
-        except TimeoutException:
-            missing_tabs.append(tab_name)
-    if missing_tabs:
-        raise Exception(f"Отсутствуют подвкладки: {', '.join(missing_tabs)}")
-
-    # Открыть подвкладки по очереди
-    test.click_element(
-        "//*[@id='sales-collapse']/ul/li[1]/a",
-        timeout=CLICK_WAIT,
-        description="Журнал регулировочных заказов",
-    )
-    time.sleep(2)
-    # Открыть вкладку 'Регулировка'
-    test.click_element(
-        "//*[@id='root']/main/div[2]/aside/div[1]/div[4]/button/div[1]",
-        timeout=CLICK_WAIT,
-        description="Регулировка - вкладка",
-    )
-    time.sleep(2)
     test.wait_visible_by_xpath(
-        "//*[contains(normalize-space(.), 'Выполнение')]",
-        timeout=VISIBILITY_WAIT,
-        description="Выполнение",
-    )
-    test.raise_if_error_banner()
-    test.click_element(
-        "//*[@id='root']/main/div[2]/aside/div[1]/div[4]/a[2]",
-        timeout=CLICK_WAIT,
-        description="Доходный договор - вкладка",
-    )
+            "//*[contains(normalize-space(.), 'Операция')]",
+            timeout=VISIBILITY_WAIT,
+            description="Операция",
+        )
     time.sleep(2)
+
+
+def step_03_open_reports_module(test: ItransTest) -> None:
+    # Вкладка: РМ Диспетчера - Отчеты
+    tab_xpath = "//div[contains(text(), 'РМ Диспетчера - Отчеты')]"
+    if not test.element_is_present(tab_xpath, timeout=DEFAULT_WAIT):
+        raise Exception("Вкладка 'РМ Диспетчера - Отчеты' не найдена на странице")
+    test.click_element(tab_xpath, timeout=CLICK_WAIT, description="РМ Диспетчера - Отчеты")
+    time.sleep(2)
+
     test.wait_visible_by_xpath(
-        "//*[contains(normalize-space(.), 'Доходный договор')]",
+        "//*[contains(normalize-space(.), 'Анализ торгов')]",
         timeout=VISIBILITY_WAIT,
-        description="Доходный договор",
+        description="Анализ торгов",
     )
+
+
+def step_04_open_schedule_module(test: ItransTest) -> None:
+    # Вкладка: Раcписание подачи АТ
+    tab_xpath = "//div[contains(text(), 'Раcписание подачи АТ')]"
+    if not test.element_is_present(tab_xpath, timeout=DEFAULT_WAIT):
+        raise Exception("Вкладка 'Раcписание подачи АТ' не найдена на странице")
+    test.click_element(tab_xpath, timeout=CLICK_WAIT, description="Раcписание подачи АТ")
+    time.sleep(2)
+
+    test.wait_visible_by_xpath(
+        "//*[contains(normalize-space(.), 'Терминал')]",
+        timeout=VISIBILITY_WAIT,
+        description="Терминал",
+    )
+
+
+def step_05_open_directory_module(test: ItransTest) -> None:
+    # Вкладка: Справочники
+    tab_xpath = "//div[contains(text(), 'Справочники')]"
+    if not test.element_is_present(tab_xpath, timeout=DEFAULT_WAIT):
+        raise Exception("Вкладка 'Справочники' не найдена на странице")
+    test.click_element(tab_xpath, timeout=CLICK_WAIT, description="Справочники")
+    time.sleep(2)
+
+    # Подвкладки и ожидаемые надписи
+    subtabs = [
+        ("//div[contains(text(), 'Водители ТК')]", "Водители ТК", "Фамилия"),
+        ("//div[contains(text(), 'Справочник ТС')]", "Справочник ТС", "Модель"),
+    ]
+
+    for xpath, title, expected_text in subtabs:
+        test.click_element(xpath, timeout=CLICK_WAIT, description=title)
+        time.sleep(2)
+        test.wait_visible_by_xpath(
+            f"//*[contains(normalize-space(.), '{expected_text}')]",
+            timeout=VISIBILITY_WAIT,
+            description=expected_text,
+        )
+        test.raise_if_error_banner()
 
 
 def main() -> int:
@@ -500,8 +386,8 @@ def main() -> int:
     telegram_chat_id = os.getenv("TEST_TELEGRAM_CHAT_ID")
 
     base_url = os.getenv("ITRANS_URL", DEFAULT_URL)
-    username = os.getenv("ITRANS_LOGIN") or os.getenv("ITRANS_USER") or os.getenv("LOGIN")
-    password = os.getenv("ITRANS_PASSWORD") or os.getenv("PASSWORD")
+    username = os.getenv("AT_ITRANS_LOGIN") or os.getenv("ITRANS_USER") or os.getenv("LOGIN")
+    password = os.getenv("AT_ITRANS_PASSWORD") or os.getenv("PASSWORD")
 
     test_result = TestResult()
     test = ItransTest()
@@ -538,7 +424,7 @@ def main() -> int:
                 print(json.dumps(test_result.to_dict(), ensure_ascii=False, indent=2))
                 return False
 
-        # Шаг 1 — Логин
+        # Шаг 1 — Логин и вход в модуль управления АТ плечом
         if not execute_step(
             1,
             "step_01_open_and_login",
@@ -548,45 +434,42 @@ def main() -> int:
         ):
             return 1
 
-        # Шаг 2 — Координатор
+        # Шаг 2 — Модуль управления АТ плечом
         if not execute_step(
             2,
-            "step_02_open_coordinator_module",
-            lambda: step_02_open_coordinator_module(test),
+            "step_02_open_at_module",
+            lambda: step_02_open_at_module(test),
         ):
             return 1
 
-        # Шаг 3 — Аналитика
+        # Шаг 3 — Отчеты
         if not execute_step(
             3,
-            "step_03_open_analytics_module",
-            lambda: step_03_open_analytics_module(test),
+            "step_03_open_reports_module",
+            lambda: step_03_open_reports_module(test),
         ):
             return 1
 
-        # Шаг 4 — Модуль управления ресурсами
+        # Шаг 4 — Справочники
         if not execute_step(
             4,
-            "step_04_open_resources_module",
-            lambda: step_04_open_resources_module(test),
+            "step_04_open_schedule_module",
+            lambda: step_04_open_schedule_module(test),
         ):
             return 1
 
-        # Шаг 5 — Регулировка
+        # Шаг 5 — Единое окно
         if not execute_step(
             5,
-            "step_05_open_sales_module",
-            lambda: step_05_open_sales_module(test),
+            "step_05_open_directory_module",
+            lambda: step_05_open_directory_module(test),
         ):
             return 1
 
-        # Успех
         test_result.finalize(success=True, message="Тест выполнен успешно", error=None)
         print(json.dumps(test_result.to_dict(), ensure_ascii=False, indent=2))
         return 0
-
     except Exception as e:
-        # Общая критическая ошибка
         err_text = f"Общая ошибка: {str(e)}"
         ss_b64 = None
         try:
@@ -609,5 +492,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-

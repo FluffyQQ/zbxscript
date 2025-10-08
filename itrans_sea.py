@@ -1,4 +1,3 @@
-#!/usr/lib64/zabbix7-lts/externalscripts/myenv/bin/python3
 import base64
 import json
 import os
@@ -33,7 +32,7 @@ VISIBILITY_WAIT = 10
 ERROR_CONTAINER_VISIBLE_ALERTS_SELECTOR = ".errors-container .alert.show"
 
 # Путь к .env и загрузка переменных, как в test_isales.py
-env_path = Path(__file__).with_name("_env")
+env_path = Path(__file__).with_name(".env")
 load_dotenv(dotenv_path=env_path)
 load_dotenv()
 
@@ -236,8 +235,12 @@ def send_telegram_alert(
             print("[telegram] пропуск: не задан TELEGRAM_BOT_TOKEN или TELEGRAM_CHAT_ID", file=sys.stderr)
         return
 
+    # Заголовок для всех сообщений этого модуля
+    header = "Модуль управления морским плечом"
+
     # Ограничим длину текста для caption (Telegram: до ~1024 символов для фото)
-    safe_caption = (text or "")
+    original_text = (text or "")
+    safe_caption = f"{header}" if not original_text else f"{header}\n{original_text}"
     if screenshot_b64 and len(safe_caption) > 1000:
         safe_caption = safe_caption[:1000] + "…"
 
@@ -250,7 +253,8 @@ def send_telegram_alert(
             data = {"chat_id": chat_id, "caption": safe_caption}
             resp = requests.post(f"{api_url}/sendPhoto", data=data, files=files, timeout=20)
         else:
-            payload = {"chat_id": chat_id, "text": text}
+            text_to_send = f"{header}" if not original_text else f"{header}\n{original_text}"
+            payload = {"chat_id": chat_id, "text": text_to_send}
             resp = requests.post(f"{api_url}/sendMessage", json=payload, timeout=20)
 
         if not resp.ok:

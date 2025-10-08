@@ -1,4 +1,3 @@
-#!/usr/lib64/zabbix7-lts/externalscripts/myenv/bin/python3
 import base64
 import json
 import os
@@ -8,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import requests
+import warnings
 from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.common.exceptions import (
@@ -21,6 +21,14 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+# Silence Selenium warning about creds in URL to keep stdout pure JSON
+warnings.filterwarnings(
+    "ignore",
+    message="Embedding username and password in URL could be insecure, use ClientConfig instead",
+    category=UserWarning,
+    module="selenium.webdriver.remote.remote_connection",
+)
+
 DEFAULT_URL = "https://itrans.trcont.ru/"
 
 # Единые таймауты ожиданий
@@ -33,7 +41,7 @@ VISIBILITY_WAIT = 10
 ERROR_CONTAINER_VISIBLE_ALERTS_SELECTOR = ".errors-container .alert.show"
 
 # Путь к .env и загрузка переменных, как в test_isales.py
-env_path = Path(__file__).with_name("_env")
+env_path = Path(__file__).with_name(".env")
 load_dotenv(dotenv_path=env_path)
 load_dotenv()
 
@@ -82,15 +90,18 @@ class TestResult:
         }
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data = {
             "success": self.success,
             "status": self.status,
             "message": self.message,
-            "error": self.error,
             "test_info": self.test_info,
             "steps": self.steps,
             "screenshot": self.screenshot,
         }
+        # Do not include error field when there is no error to avoid null in Zabbix
+        if self.error is not None:
+            data["error"] = self.error
+        return data
 
 
 def env(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -236,8 +247,12 @@ def send_telegram_alert(
             print("[telegram] пропуск: не задан TELEGRAM_BOT_TOKEN или TELEGRAM_CHAT_ID", file=sys.stderr)
         return
 
+    # Заголовок для всех сообщений этого модуля
+    header = "Модуль управления ЖД плечом"
+
     # Ограничим длину текста для caption (Telegram: до ~1024 символов для фото)
-    safe_caption = (text or "")
+    original_text = (text or "")
+    safe_caption = f"{header}" if not original_text else f"{header}\n{original_text}"
     if screenshot_b64 and len(safe_caption) > 1000:
         safe_caption = safe_caption[:1000] + "…"
 
@@ -250,7 +265,8 @@ def send_telegram_alert(
             data = {"chat_id": chat_id, "caption": safe_caption}
             resp = requests.post(f"{api_url}/sendPhoto", data=data, files=files, timeout=20)
         else:
-            payload = {"chat_id": chat_id, "text": text}
+            text_to_send = f"{header}" if not original_text else f"{header}\n{original_text}"
+            payload = {"chat_id": chat_id, "text": text_to_send}
             resp = requests.post(f"{api_url}/sendMessage", json=payload, timeout=20)
 
         if not resp.ok:
