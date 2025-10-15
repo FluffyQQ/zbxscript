@@ -27,6 +27,7 @@ DEFAULT_URL = "https://itrans.trcont.ru/"
 DEFAULT_WAIT = 10
 CLICK_WAIT = 10
 VISIBILITY_WAIT = 10
+SCREENSHOTS_DIR = '/opt/screenshots'
 
 # Базовый CSS-селектор для видимых алертов внутри контейнера ошибок
 # Дальше фильтруем по классу/тексту, чтобы определить именно ошибку
@@ -82,15 +83,18 @@ class TestResult:
         }
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data = {
             "success": self.success,
             "status": self.status,
             "message": self.message,
-            "error": self.error,
             "test_info": self.test_info,
             "steps": self.steps,
             "screenshot": self.screenshot,
         }
+        # Do not include error field when there is no error to avoid null in Zabbix
+        if self.error is not None:
+            data["error"] = self.error
+        return data
 
 
 def env(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -126,6 +130,28 @@ def get_screenshot_b64(driver: WebDriver) -> str:
     # Keep screenshot only in memory
     png_bytes = driver.get_screenshot_as_png()
     return base64.b64encode(png_bytes).decode("ascii")
+
+
+def ensure_screenshots_dir() -> None:
+    try:
+        os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+    except Exception:
+        pass
+
+
+def save_screenshot_file(driver: WebDriver, filename: str) -> None:
+    try:
+        ensure_screenshots_dir()
+        filepath = os.path.join(SCREENSHOTS_DIR, filename)
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        except Exception:
+            pass
+        with open(filepath, 'wb') as f:
+            f.write(driver.get_screenshot_as_png())
+    except Exception:
+        pass
 
 
 class ItransTest:
@@ -400,6 +426,7 @@ def main() -> int:
             except Exception as e:
                 err = f"Шаг {step_number} ошибка: {str(e)}"
                 ss_b64 = get_screenshot_b64(driver)
+                save_screenshot_file(driver, 'itrans_sea_error.png')
                 test_result.add_step(step_key, status="0", duration_seconds=time.time() - t0)
                 test_result.set_screenshot_b64(ss_b64)
                 send_telegram_alert(
@@ -441,6 +468,7 @@ def main() -> int:
             if driver:
                 ss_b64 = get_screenshot_b64(driver)
                 test_result.set_screenshot_b64(ss_b64)
+                save_screenshot_file(driver, 'itrans_sea_error.png')
         except Exception:
             pass
         send_telegram_alert(telegram_token, telegram_chat_id, text=err_text, screenshot_b64=ss_b64)

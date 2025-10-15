@@ -27,6 +27,7 @@ DEFAULT_URL = "https://itrans.trcont.ru/"
 DEFAULT_WAIT = 10
 CLICK_WAIT = 10
 VISIBILITY_WAIT = 10
+SCREENSHOTS_DIR = '/opt/screenshots'
 
 # Базовый CSS-селектор для видимых алертов внутри контейнера ошибок
 # Дальше фильтруем по классу/тексту, чтобы определить именно ошибку
@@ -82,15 +83,18 @@ class TestResult:
         }
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data = {
             "success": self.success,
             "status": self.status,
             "message": self.message,
-            "error": self.error,
             "test_info": self.test_info,
             "steps": self.steps,
             "screenshot": self.screenshot,
         }
+        # Do not include error field when there is no error to avoid null in Zabbix
+        if self.error is not None:
+            data["error"] = self.error
+        return data
 
 
 def env(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -128,18 +132,38 @@ def get_screenshot_b64(driver: WebDriver) -> str:
     return base64.b64encode(png_bytes).decode("ascii")
 
 
+def ensure_screenshots_dir() -> None:
+    try:
+        os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+    except Exception:
+        pass
+
+
+def save_screenshot_file(driver: WebDriver, filename: str) -> None:
+    try:
+        ensure_screenshots_dir()
+        filepath = os.path.join(SCREENSHOTS_DIR, filename)
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        except Exception:
+            pass
+        with open(filepath, 'wb') as f:
+            f.write(driver.get_screenshot_as_png())
+    except Exception:
+        pass
+
+
 class ItransTest:
     def __init__(self):
         self.driver: Optional[WebDriver] = None
         self.wait: Optional[WebDriverWait] = None
         self.check_error_banner: bool = True
 
-    def raise_if_error_banner(self) -> None:
-        """Если на странице появился баннер ошибки — бросаем исключение."""
-        if not self.check_error_banner:
-            return
+    def _get_error_banner_text(self) -> Optional[str]:
+        """Возвращает текст баннера ошибки, если он видим, иначе None."""
         if not self.driver:
-            return
+            return None
         try:
             alerts = self.driver.find_elements(By.CSS_SELECTOR, ERROR_CONTAINER_VISIBLE_ALERTS_SELECTOR)
             visible_alerts = [el for el in alerts if el.is_displayed()]
@@ -150,10 +174,46 @@ class ItransTest:
                 # Подстрахуемся по тексту — иногда класс может меняться, а текст остаётся
                 is_error_by_text = ("ошибка" in text.lower()) or ("произошла ошибка" in text.lower())
                 if is_error_by_class or is_error_by_text:
-                    raise Exception(f"Обнаружено сообщение об ошибке на странице: {text}")
+                    return text or ""
         except WebDriverException:
             # Не ломаем логику при временных сбоях драйвера на find_elements
+            return None
+        return None
+
+    def raise_if_error_banner(self) -> None:
+        """Если на странице появился баннер ошибки — даём сайту восстановиться и проверяем повторно.
+
+        Алгоритм:
+        - Если баннер ошибки обнаружен, подождать 30 секунд
+        - Обновить страницу и дождаться полной загрузки
+        - Проверить баннер повторно; если он всё ещё есть — бросить исключение, иначе продолжить
+        """
+        if not self.check_error_banner:
+            return
+        if not self.driver:
+            return
+
+        text_before = self._get_error_banner_text()
+        if text_before is None:
+            return
+
+        # Дадим системе время восстановиться
+        time.sleep(30)
+
+        # Обновляем страницу и ждём полной загрузки
+        try:
+            self.driver.refresh()
+            WebDriverWait(self.driver, DEFAULT_WAIT).until(
+                lambda drv: drv.execute_script("return document.readyState") == "complete"
+            )
+            time.sleep(2)
+        except Exception:
+            # Даже если обновление/ожидание дали ошибку — всё равно проверим баннер повторно
             pass
+
+        text_after = self._get_error_banner_text()
+        if text_after is not None:
+            raise Exception(f"Обнаружено сообщение об ошибке на странице: {text_after}")
 
     def wait_element(self, xpath: str, timeout: int = DEFAULT_WAIT):
         try:
@@ -528,6 +588,7 @@ def main() -> int:
             except Exception as e:
                 err = f"Шаг {step_number} ошибка: {str(e)}"
                 ss_b64 = get_screenshot_b64(driver)
+                save_screenshot_file(driver, 'itrans_k2_error.png')
                 test_result.add_step(step_key, status="0", duration_seconds=time.time() - t0)
                 test_result.set_screenshot_b64(ss_b64)
                 send_telegram_alert(telegram_token, telegram_chat_id, text=err, screenshot_b64=ss_b64)
@@ -594,6 +655,7 @@ def main() -> int:
             if driver:
                 ss_b64 = get_screenshot_b64(driver)
                 test_result.set_screenshot_b64(ss_b64)
+                save_screenshot_file(driver, 'itrans_k2_error.png')
         except Exception:
             pass
         send_telegram_alert(telegram_token, telegram_chat_id, text=err_text, screenshot_b64=ss_b64)
