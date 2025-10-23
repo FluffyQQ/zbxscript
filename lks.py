@@ -113,7 +113,7 @@ def build_driver() -> WebDriver:
             )
         except Exception:
             raise Exception(
-                "Ошибка подключения к Selenium Grid: не удалось установить соединение с удалённым драйвером."
+                "Ошибка подключения к Selenium Grid: не удалось установить соединение."
             )
     else:
         return webdriver.Chrome(options=chrome_options)
@@ -187,6 +187,8 @@ def send_telegram_alert(
     chat_id: Optional[str],
     text: str,
     screenshot_b64: Optional[str] = None,
+    step_number: Optional[str] = None,
+    step_description: Optional[str] = None,
 ) -> None:
     """Отправка уведомления в Telegram. Не бросает исключения наружу."""
     debug = os.getenv("TELEGRAM_DEBUG", "").lower() in ("1", "true", "yes")
@@ -195,19 +197,34 @@ def send_telegram_alert(
             print("[telegram] пропуск: не задан TELEGRAM_BOT_TOKEN или TELEGRAM_CHAT_ID", file=sys.stderr)
         return
 
-    header = "LKS"
-    original_text = text or ""
-    safe_caption = f"{header}" if not original_text else f"{header}\n{original_text}"
+    # Получаем текущую дату и время
+    from datetime import datetime
+    now = datetime.now()
+    date_str = now.strftime('%d.%m.%Y')
+    time_str = now.strftime('%H:%M')
+    
+    # Формируем информацию о шаге
+    if step_number and step_description:
+        step_info = f"Шаг {step_number} - {step_description}"
+    elif step_number:
+        step_info = f"Шаг {step_number}"
+    elif step_description:
+        step_info = step_description
+    else:
+        step_info = "Шаг N/A"
+    
+    # Формируем caption в формате как в test_isales.py
+    caption = f"""<b>Ошибка в тесте iTrans "ЛК соисполнителя"</b>\n\n<b>Шаг:</b> {step_info}\n<b>Дата:</b> {date_str}\n<b>Время:</b> {time_str}"""
 
     api_url = f"https://api.telegram.org/bot{token}"
     try:
         if screenshot_b64:
             photo_bytes = base64.b64decode(screenshot_b64)
             files = {"photo": ("error.png", photo_bytes, "image/png")}
-            data = {"chat_id": chat_id, "caption": safe_caption}
+            data = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
             resp = requests.post(f"{api_url}/sendPhoto", data=data, files=files, timeout=20)
         else:
-            payload = {"chat_id": chat_id, "text": safe_caption}
+            payload = {"chat_id": chat_id, "text": caption, "parse_mode": "HTML"}
             resp = requests.post(f"{api_url}/sendMessage", json=payload, timeout=20)
         if not resp.ok and debug:
             try:
@@ -353,10 +370,52 @@ def step_05_check_container_filter(test: LksTest) -> None:
     raise Exception("Типы 40** не обнаружены")
 
 
+def execute_step_with_retry(step_number, step_key, action, driver, test_result, telegram_token, telegram_chat_id, step_description=None, max_retries=2):
+    """Выполняет шаг с повторными попытками и обновлением страницы при ошибках"""
+    for attempt in range(max_retries + 1):
+        t0 = time.time()
+        try:
+            action()
+            test_result.add_step(step_key, status="1", duration_seconds=time.time() - t0)
+            return True
+        except Exception as e:
+            if attempt < max_retries:
+                # Обновляем страницу и повторяем попытку
+                try:
+                    if driver:
+                        driver.refresh()
+                        WebDriverWait(driver, DEFAULT_WAIT).until(
+                            lambda drv: drv.execute_script("return document.readyState") == "complete"
+                        )
+                        time.sleep(3)
+                except Exception:
+                    pass
+                continue
+            else:
+                # Последняя попытка неудачна - завершаем с ошибкой
+                err = f"Шаг {step_number} ошибка: {str(e)}"
+                ss_b64 = None
+                try:
+                    ss_b64 = get_screenshot_b64(driver)
+                    test_result.set_screenshot_b64(ss_b64)
+                    save_screenshot_file(driver, 'lks_error.png')
+                except Exception:
+                    pass
+                test_result.add_step(step_key, status="0", duration_seconds=time.time() - t0)
+                send_telegram_alert(telegram_token, telegram_chat_id, text=err, screenshot_b64=ss_b64, step_number=str(step_number), step_description=step_description)
+                test_result.finalize(
+                    success=False,
+                    message=f"Тест завершился с ошибкой на шаге {step_number}",
+                    error=err,
+                )
+                print(json.dumps(test_result.to_dict(), ensure_ascii=False, indent=2))
+                return False
+
+
 def main() -> int:
     driver: Optional[WebDriver] = None
-    telegram_token = os.getenv("TEST_TELEGRAM_BOT_TOKEN")
-    telegram_chat_id = os.getenv("TEST_TELEGRAM_CHAT_ID")
+    telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
     base_url = os.getenv("LKS_URL", DEFAULT_URL)
     username = os.getenv("ITRANS_LOGIN") or os.getenv("LOGIN")
@@ -373,41 +432,16 @@ def main() -> int:
         test.driver = driver
         test.wait = WebDriverWait(driver, DEFAULT_WAIT)
 
-        def execute_step(step_number, step_key, action):
-            t0 = time.time()
-            try:
-                action()
-                test_result.add_step(step_key, status="1", duration_seconds=time.time() - t0)
-                return True
-            except Exception as e:
-                err = f"Шаг {step_number} ошибка: {str(e)}"
-                ss_b64 = None
-                try:
-                    ss_b64 = get_screenshot_b64(driver)
-                    test_result.set_screenshot_b64(ss_b64)
-                    save_screenshot_file(driver, 'lks_error.png')
-                except Exception:
-                    pass
-                test_result.add_step(step_key, status="0", duration_seconds=time.time() - t0)
-                send_telegram_alert(telegram_token, telegram_chat_id, text=err, screenshot_b64=ss_b64)
-                test_result.finalize(
-                    success=False,
-                    message=f"Тест завершился с ошибкой на шаге {step_number}",
-                    error=err,
-                )
-                print(json.dumps(test_result.to_dict(), ensure_ascii=False, indent=2))
-                return False
-
         # Steps sequence adapted and merged: open site + authenticate combined
-        if not execute_step(1, "step_01_open_and_authenticate", lambda: step_01_open_and_authenticate(test, base_url, username, password)):
+        if not execute_step_with_retry(1, "step_01_open_and_authenticate", lambda: step_01_open_and_authenticate(test, base_url, username, password), driver, test_result, telegram_token, telegram_chat_id, step_description="Вход в систему"):
             return 1
-        if not execute_step(2, "step_02_open_journal", lambda: step_02_open_journal(test)):
+        if not execute_step_with_retry(2, "step_02_open_journal", lambda: step_02_open_journal(test), driver, test_result, telegram_token, telegram_chat_id, step_description="Открытие Журнал заявок"):
             return 1
-        if not execute_step(3, "step_03_open_expeditor_report_and_select_rail", lambda: step_03_open_expeditor_report_and_select_rail(test)):
+        if not execute_step_with_retry(3, "step_03_open_expeditor_report_and_select_rail", lambda: step_03_open_expeditor_report_and_select_rail(test), driver, test_result, telegram_token, telegram_chat_id, step_description="Открытие Отчет экспедитора"):
             return 1
-        if not execute_step(4, "step_04_open_available_equipment", lambda: step_04_open_available_equipment(test)):
+        if not execute_step_with_retry(4, "step_04_open_available_equipment", lambda: step_04_open_available_equipment(test), driver, test_result, telegram_token, telegram_chat_id, step_description="Доступное оборудование"):
             return 1
-        if not execute_step(5, "step_05_check_container_filter", lambda: step_05_check_container_filter(test)):
+        if not execute_step_with_retry(5, "step_05_check_container_filter", lambda: step_05_check_container_filter(test), driver, test_result, telegram_token, telegram_chat_id, step_description="Проверка фильтра контейнеров"):
             return 1
 
         # Success
@@ -424,7 +458,10 @@ def main() -> int:
                 save_screenshot_file(driver, 'lks_error.png')
         except Exception:
             pass
-        send_telegram_alert(telegram_token, telegram_chat_id, text=err_text, screenshot_b64=ss_b64)
+        
+        # Используем текст ошибки как описание шага
+        step_description = str(e)
+        send_telegram_alert(telegram_token, telegram_chat_id, text=err_text, screenshot_b64=ss_b64, step_number=None, step_description=step_description)
         test_result.finalize(success=False, message="Тест завершился с ошибкой", error=err_text)
         print(json.dumps(test_result.to_dict(), ensure_ascii=False, indent=2))
         return 1
