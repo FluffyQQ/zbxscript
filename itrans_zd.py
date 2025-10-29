@@ -377,41 +377,41 @@ def step_02_open_rail_module(test: ItransTest) -> None:
 
     # Подвкладки и ожидаемые надписи
     subtabs = [
-        ("//*[@id='journals-collapse']/ul/li[3]/a", "Журнал накладных ЭТРАН", "№ накладной"),
-        ("//*[@id='journals-collapse']/ul/li[4]/a", "Журнал инструкций грузоотправителю", "№ заказа"),
+        ("//*[@id='journals-collapse']/ul/li[1]/a", "Журнал накладных ЭТРАН", "№ накладной"),
+        ("//*[@id='journals-collapse']/ul/li[2]/a", "Журнал инструкций грузоотправителю", "№ заказа"),
         (
-            "//*[@id='journals-collapse']/ul/li[6]/a",
+            "//*[@id='journals-collapse']/ul/li[4]/a",
             "Бестелеграммная технология при транзитных перевозках",
             "№ заказа",
         ),
-        ("//*[@id='journals-collapse']/ul/li[7]/a", "Журнал заказов", "Заказ"),
+        ("//*[@id='journals-collapse']/ul/li[5]/a", "Журнал заказов", "Заказ"),
         (
-            "//*[@id='journals-collapse']/ul/li[8]/a",
+            "//*[@id='journals-collapse']/ul/li[6]/a",
             "Журнал несоответствия заказов и накладных",
             "Заказ",
         ),
         (
-            "//*[@id='journals-collapse']/ul/li[9]/a",
+            "//*[@id='journals-collapse']/ul/li[7]/a",
             "Журнал контроля устранения несоответствий заказов и накладных",
             "Всего по ЖД",
         ),
         (
-            "//*[@id='journals-collapse']/ul/li[10]/a",
+            "//*[@id='journals-collapse']/ul/li[8]/a",
             "Журнал памяток приемосдатчика (ГУ-45)",
             "Номер памятки",
         ),
         (
-            "//*[@id='journals-collapse']/ul/li[11]/a",
+            "//*[@id='journals-collapse']/ul/li[9]/a",
             "Журнал Отправок в Заявке на перевозку ф. ГУ-12",
             "Состояние заявки",
         ),
         (
-            "//*[@id='journals-collapse']/ul/li[12]/a",
+            "//*[@id='journals-collapse']/ul/li[10]/a",
             "Журнал заявок на перевозку ф. ГУ-12",
             "Состояние заявки",
         ),
-        ("//*[@id='journals-collapse']/ul/li[14]/a", "Журнал актов АОФ", "Номер АОФ"),
-        ("//*[@id='journals-collapse']/ul/li[15]/a", "Поезд", "Номер поезда"),
+        ("//*[@id='journals-collapse']/ul/li[12]/a", "Журнал актов АОФ", "Номер АОФ"),
+        ("//*[@id='journals-collapse']/ul/li[13]/a", "Поезд", "Номер поезда"),
     ]
     # Проверка наличия подвкладок
     missing_tabs = []
@@ -518,7 +518,7 @@ def step_04_open_directory_module(test: ItransTest) -> None:
             "Идентификатор условия перевозки",
         ),
         ("//*[@id='directory-collapse']/ul/li[9]/a", "Справочник номеров документов", "Класс документа"),
-        ("//*[@id='directory-collapse']/ul/li[13]/a", "Справочник станций эквивалентов", "Наименование станции"),
+        ("//*[@id='directory-collapse']/ul/li[10]/a", "Справочник станций эквивалентов", "Наименование станции"),
     ]
     # Проверка наличия подвкладок
     missing_tabs = []
@@ -561,7 +561,7 @@ def step_05_open_unified_window_module(test: ItransTest) -> None:
             "Предоставление данных о дислокации вагонов на иностранных территориях",
             "Список вагонов",
         ),
-        ("//*[@id='ed_okno-collapse']/ul/li[4]", "Натурные листы поездов", "Индекс поезда"),
+        ("//*[@id='ed_okno-collapse']/ul/li[4]", "Натурные листы", "Индекс поезда"),
         ("//*[@id='ed_okno-collapse']/ul/li[5]", "Последний переход вагона межгосударственных стыков", "Индекс поезда"),
         (
             "//*[@id='ed_okno-collapse']/ul/li[6]",
