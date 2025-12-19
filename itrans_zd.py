@@ -48,7 +48,7 @@ load_dotenv(dotenv_path=env_path)
 load_dotenv()
 
 # Переключатель для локального запуска (как в test_isales.py)
-USE_SELENIUM_GRID = True  # False — локально, True — через Grid
+USE_SELENIUM_GRID = False  # False — локально, True — через Grid
 
 # Данные Selenium Grid (как в test_isales.py)
 SELENIUM_GRID_LOGIN = os.getenv('SELENIUM_GRID_LOGIN')
@@ -348,23 +348,20 @@ def step_01_open_and_login(test: ItransTest, base_url: str, username: str, passw
     test.wait_element("//input[@id='password']", timeout=20).send_keys(password)
     test.click_element("//input[@type='submit']", timeout=CLICK_WAIT)
 
-    # Проверка успешного входа — наличие вкладки "Модуль управления ЖД плечом"
-    WebDriverWait(d, VISIBILITY_WAIT).until(
-        EC.presence_of_element_located((By.XPATH, "//*[@id='journals']/button/span"))
-    )
-
 
 def step_02_open_rail_module(test: ItransTest) -> None:
    # Если есть кнопка "Обновить" — нажать
     try:
-        test.click_element("//*[@id='app']/div[4]/div/div[2]/a[1]", timeout=5, description="Обновить")
+        test.click_element("//*[@id='app']/div[3]/div/div[2]/a[1]", timeout=5, description="Обновить")
         time.sleep(1)
     except Exception:
         pass
 
-    # Нажать кнопку для раскрытия меню
-    test.click_element("//*[@id='app']/div[4]/div/div[1]/span", timeout=CLICK_WAIT)
-    time.sleep(5)
+    # # Проверяем состояние меню скрыто/раскрыто
+    # menu_collapsed_xpath = "//*[contains(@class, 'left-menu-comp')]"
+    # if test.element_is_present(menu_collapsed_xpath, timeout=5):
+    #     test.click_element("//*[@id='app']/div[3]/div/div[1]/span/svg/path", timeout=CLICK_WAIT)
+    #     time.sleep(2)
 
     # Проверяем наличие вкладки "Модуль управления ЖД плечом"
     tab_xpath = "//*[@id='journals']/button/span"
@@ -438,6 +435,12 @@ def step_02_open_rail_module(test: ItransTest) -> None:
 
 
 def step_03_open_reports_module(test: ItransTest) -> None:
+    # # Проверяем состояние меню скрыто/раскрыто
+    # menu_collapsed_xpath = "//*[contains(@class, 'left-menu-comp')]"
+    # if test.element_is_present(menu_collapsed_xpath, timeout=5):
+    #     test.click_element("//*[@id='app']/div[4]/div/div[1]/span", timeout=CLICK_WAIT)
+    #     time.sleep(2)
+
     # Вкладка: Отчеты
     tab_xpath = "//*[@id='reports']/button/span"
     if not test.element_is_present(tab_xpath, timeout=DEFAULT_WAIT):
@@ -498,6 +501,12 @@ def step_03_open_reports_module(test: ItransTest) -> None:
 
 
 def step_04_open_directory_module(test: ItransTest) -> None:
+    # # Проверяем состояние меню скрыто/раскрыто
+    # menu_collapsed_xpath = "//*[contains(@class, 'left-menu-comp')]"
+    # if test.element_is_present(menu_collapsed_xpath, timeout=5):
+    #     test.click_element("//*[@id='app']/div[4]/div/div[1]/span", timeout=CLICK_WAIT)
+    #     time.sleep(2)
+
     # Вкладка: Справочники
     tab_xpath = "//*[@id='directory']/button/span"
     if not test.element_is_present(tab_xpath, timeout=DEFAULT_WAIT):
@@ -545,6 +554,12 @@ def step_04_open_directory_module(test: ItransTest) -> None:
 
 
 def step_05_open_unified_window_module(test: ItransTest) -> None:
+    # # Проверяем состояние меню скрыто/раскрыто
+    # menu_collapsed_xpath = "//*[contains(@class, 'left-menu-comp')]"
+    # if test.element_is_present(menu_collapsed_xpath, timeout=5):
+    #     test.click_element("//*[@id='app']/div[4]/div/div[1]/span", timeout=CLICK_WAIT)
+    #     time.sleep(2)
+
     # Вкладка: Единое окно
     tab_xpath = "//*[@id='ed_okno']/button/span"
     if not test.element_is_present(tab_xpath, timeout=DEFAULT_WAIT):
